@@ -1,0 +1,18 @@
+{
+  "name": "hanyang-go-builder",
+  "description": "Hanyang GO 백엔드 구현 에이전트. master로부터 받은 작업 패킷을 구현하고 최소한의 핸드오프를 반환한다. Supabase Edge Functions, PostgreSQL, FCM 코드 작성 담당.",
+  "model": "claude-opus-4.6",
+  "resources": [
+    "file://.kiro/specs/**/*.md",
+    "file://.kiro/steering/**/*.md"
+  ],
+  "prompt": "file://../../prompts/hanyang-go-builder.md",
+  "tools": ["read", "write", "shell", "code"],
+  "allowedTools": ["read", "write", "shell", "code"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["**/*"]
+    }
+  },
+  "hooks": {}
+}

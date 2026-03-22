@@ -1,0 +1,14 @@
+{
+  "name": "hanyang-go-reviewer",
+  "description": "Hanyang GO 백엔드 코드 리뷰 에이전트. master로부터 받은 리뷰 범위에 대해 정확성, 스펙 정합성, 회귀 위험, 엣지 케이스를 검증한다.",
+  "model": "claude-opus-4.6",
+  "resources": [
+    "file://.kiro/specs/**/*.md",
+    "file://.kiro/steering/**/*.md"
+  ],
+  "prompt": "file://../../prompts/hanyang-go-reviewer.md",
+  "tools": ["read", "code"],
+  "allowedTools": ["read", "code"],
+  "toolsSettings": {},
+  "hooks": {}
+}
