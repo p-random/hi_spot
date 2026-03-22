@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
-import MapView from '@/components/map/MapView';
+import MapView from '@/components/map/DynamicMapView';
 import EventPin from '@/components/map/EventPin';
 import EventPopup from '@/components/map/EventPopup';
 import EventDetailPanel from '@/components/event/EventDetailPanel';
@@ -97,8 +97,18 @@ function InnerPage({
   events, userId, userLat, userLng, userAccuracy,
   locationError, locationLoading, onRequestLocation,
 }: InnerPageProps) {
+  const map = useMap();
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [panelEventId, setPanelEventId] = useState<string | null>(null);
+  const hasFlyRef = useRef(false);
+
+  // Fly the map to the user's location when coordinates arrive
+  useEffect(() => {
+    if (map && userLat != null && userLng != null) {
+      map.flyTo({ center: [userLng, userLat], zoom: 16.5, speed: 1.5 });
+      hasFlyRef.current = true;
+    }
+  }, [map, userLat, userLng]);
 
   const selectedEvent = events.find((e) => e.id === selectedEventId) ?? null;
   const panelEvent = events.find((e) => e.id === panelEventId) ?? null;

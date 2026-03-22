@@ -25,16 +25,24 @@ async function initFirebase() {
   });
 }
 
-// App shell caching for offline support.
-const CACHE_NAME = 'hi-spot-shell-v1';
-const SHELL_URLS = ['/', '/manifest.json'];
+// NOTE: App shell caching (/) is intentionally disabled.
+// Next.js App Router manages its own client-side routing and hydration.
+// A service worker serving cached HTML for '/' causes
+// "Router action dispatched before initialization" errors because the
+// stale HTML doesn't match the current JS bundle.
+// Only manifest.json is cached for PWA install support.
+const CACHE_NAME = 'hi-spot-shell-v2';
+const SHELL_URLS = ['/manifest.json'];
 
-// Firebase must be initialized before the SW activates so background messages work.
 self.addEventListener('install', (event) => {
   event.waitUntil(
     Promise.all([
       initFirebase(),
       caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_URLS)),
+      // Purge old caches that included '/'
+      caches.keys().then((keys) =>
+        Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      ),
     ]).then(() => self.skipWaiting())
   );
 });
@@ -48,8 +56,9 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Only cache-first for shell URLs; let everything else go to network.
-  if (SHELL_URLS.includes(new URL(event.request.url).pathname)) {
+  const pathname = new URL(event.request.url).pathname;
+  // Only serve manifest from cache; let Next.js handle all page navigation.
+  if (pathname === '/manifest.json') {
     event.respondWith(
       caches.match(event.request).then((cached) => cached ?? fetch(event.request))
     );

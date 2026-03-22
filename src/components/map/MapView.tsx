@@ -9,10 +9,11 @@ import { MapProvider } from '@/hooks/useMap';
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!;
 
 function add3DBuildings(map: mapboxgl.Map) {
-  // Insert the 3D building layer below label layers so labels stay on top
-  const labelLayerId = map
-    .getStyle()
-    .layers.find((l) => l.type === 'symbol' && (l.layout as { 'text-field'?: unknown })?.['text-field'])?.id;
+  const layers = map.getStyle().layers;
+  if (!layers) return;
+  const labelLayerId = layers.find(
+    (l) => l.type === 'symbol' && (l.layout as { 'text-field'?: unknown })?.['text-field'],
+  )?.id;
 
   map.addLayer(
     {
@@ -29,7 +30,7 @@ function add3DBuildings(map: mapboxgl.Map) {
         'fill-extrusion-opacity': 0.6,
       },
     },
-    labelLayerId
+    labelLayerId,
   );
 }
 
@@ -39,36 +40,59 @@ interface MapViewProps {
 
 export default function MapView({ children }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<mapboxgl.Map | null>(null);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    const el = mapContainerRef.current;
+    if (!el) return;
 
-    const instance = new mapboxgl.Map({
-      container: containerRef.current,
-      style: MAP_CONFIG.style,
-      center: MAP_CONFIG.center,
-      zoom: MAP_CONFIG.zoom,
-      pitch: MAP_CONFIG.pitch,
-      bearing: MAP_CONFIG.bearing,
-    });
+    // Defer map creation so the browser has painted the container with its
+    // final dimensions.  Without this, Mapbox may see a 0×0 rect and skip
+    // tile fetching entirely, resulting in a blank white canvas.
+    let instance: mapboxgl.Map | null = null;
+    const rafId = requestAnimationFrame(() => {
+      instance = new mapboxgl.Map({
+        container: el,
+        style: MAP_CONFIG.style,
+        center: MAP_CONFIG.center,
+        zoom: MAP_CONFIG.zoom,
+        pitch: MAP_CONFIG.pitch,
+        bearing: MAP_CONFIG.bearing,
+      });
 
-    instance.on('load', () => {
-      add3DBuildings(instance);
-      setMap(instance);
+      instance.on('load', () => {
+        // Force Mapbox to recalculate canvas size after the style loads
+        instance!.resize();
+        add3DBuildings(instance!);
+        setMap(instance);
+      });
+
+      // Also resize once the map is idle (safety net)
+      instance.once('idle', () => {
+        instance?.resize();
+      });
     });
 
     return () => {
-      instance.remove();
+      cancelAnimationFrame(rafId);
+      instance?.remove();
       setMap(null);
     };
   }, []);
 
   return (
     <MapProvider value={map}>
-      {/* Full-screen map container, mobile-first */}
-      <div className="relative w-full h-dvh">
-        <div ref={containerRef} className="absolute inset-0" />
+      {/* Outer wrapper: full viewport height via inline style (avoids Tailwind compilation issues) */}
+      <div
+        ref={containerRef}
+        style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}
+      >
+        {/* Map canvas container: absolutely fills parent */}
+        <div
+          ref={mapContainerRef}
+          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+        />
         {map && children}
       </div>
     </MapProvider>
