@@ -1,65 +1,224 @@
-import Image from "next/image";
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import mapboxgl from 'mapbox-gl';
+import MapView from '@/components/map/MapView';
+import EventPin from '@/components/map/EventPin';
+import EventPopup from '@/components/map/EventPopup';
+import EventDetailPanel from '@/components/event/EventDetailPanel';
+import { useEvents } from '@/hooks/useEvents';
+import { useGeolocation } from '@/hooks/useGeolocation';
+import { useMap } from '@/hooks/useMap';
+import type { Event } from '@/types';
+
+// Stable demo user id for MVP (no auth)
+const USER_ID = 'demo-user-00000000-0000-0000-0000-000000000001';
+
+type ActiveEvent = Pick<
+  Event,
+  'id' | 'title' | 'description' | 'lat' | 'lng' | 'join_radius_m' |
+  'max_slots' | 'current_slots' | 'reward_points' | 'recruit_duration_min' | 'activated_at' | 'status'
+>;
+
+// ─── Location dot rendered inside MapView context ────────────────────────────
+
+interface LocationDotProps {
+  lat: number;
+  lng: number;
+  accuracy: number;
+}
+
+function LocationDot({ lat, lng, accuracy }: LocationDotProps) {
+  const map = useMap();
+  const markerRef = useRef<mapboxgl.Marker | null>(null);
+  const circleIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!map) return;
+
+    // Blue dot marker
+    const el = document.createElement('div');
+    el.style.cssText = `
+      width:16px;height:16px;border-radius:50%;
+      background:#3B82F6;border:2px solid white;
+      box-shadow:0 0 0 4px rgba(59,130,246,0.25);
+    `;
+    const marker = new mapboxgl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
+    markerRef.current = marker;
+
+    // Accuracy circle as a GeoJSON source + fill layer
+    const sourceId = `location-accuracy-${Date.now()}`;
+    circleIdRef.current = sourceId;
+
+    const radiusKm = accuracy / 1000;
+    const steps = 64;
+    const coords: [number, number][] = Array.from({ length: steps + 1 }, (_, i) => {
+      const angle = (i / steps) * 2 * Math.PI;
+      const dLat = (radiusKm / 111.32) * Math.cos(angle);
+      const dLng = (radiusKm / (111.32 * Math.cos((lat * Math.PI) / 180))) * Math.sin(angle);
+      return [lng + dLng, lat + dLat];
+    });
+
+    map.addSource(sourceId, {
+      type: 'geojson',
+      data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] }, properties: {} },
+    });
+    map.addLayer({
+      id: sourceId,
+      type: 'fill',
+      source: sourceId,
+      paint: { 'fill-color': '#3B82F6', 'fill-opacity': 0.12 },
+    });
+
+    return () => {
+      marker.remove();
+      if (map.getLayer(sourceId)) map.removeLayer(sourceId);
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+    };
+  }, [map, lat, lng, accuracy]);
+
+  return null;
+}
+
+// ─── Inner page that has access to MapContext ─────────────────────────────────
+
+interface InnerPageProps {
+  events: ActiveEvent[];
+  userId: string;
+  userLat: number | null;
+  userLng: number | null;
+  userAccuracy: number | null;
+  locationError: string | null;
+  locationLoading: boolean;
+  onRequestLocation: () => void;
+}
+
+function InnerPage({
+  events, userId, userLat, userLng, userAccuracy,
+  locationError, locationLoading, onRequestLocation,
+}: InnerPageProps) {
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [panelEventId, setPanelEventId] = useState<string | null>(null);
+
+  const selectedEvent = events.find((e) => e.id === selectedEventId) ?? null;
+  const panelEvent = events.find((e) => e.id === panelEventId) ?? null;
+
+  function handlePinClick(eventId: string) {
+    setSelectedEventId(eventId);
+  }
+
+  function handleDetailClick(eventId: string) {
+    setPanelEventId(eventId);
+    setSelectedEventId(null);
+  }
+
+  function handlePopupClose() {
+    setSelectedEventId(null);
+  }
+
+  function handlePanelClose() {
+    setPanelEventId(null);
+  }
+
+  return (
+    <>
+      {/* Event pins */}
+      {events.map((event) => (
+        <EventPin
+          key={event.id}
+          id={event.id}
+          lat={event.lat}
+          lng={event.lng}
+          status={event.status}
+          currentSlots={event.current_slots}
+          maxSlots={event.max_slots}
+          onPinClick={handlePinClick}
+        />
+      ))}
+
+      {/* Active popup */}
+      {selectedEvent && (
+        <EventPopup
+          key={selectedEvent.id}
+          id={selectedEvent.id}
+          lat={selectedEvent.lat}
+          lng={selectedEvent.lng}
+          title={selectedEvent.title}
+          status={selectedEvent.status}
+          currentSlots={selectedEvent.current_slots}
+          maxSlots={selectedEvent.max_slots}
+          rewardPoints={selectedEvent.reward_points}
+          onDetailClick={handleDetailClick}
+          onClose={handlePopupClose}
+        />
+      )}
+
+      {/* User location dot */}
+      {userLat != null && userLng != null && userAccuracy != null && (
+        <LocationDot lat={userLat} lng={userLng} accuracy={userAccuracy} />
+      )}
+
+      {/* Location button */}
+      <button
+        onClick={onRequestLocation}
+        disabled={locationLoading}
+        aria-label="내 위치 보기"
+        className="
+          absolute bottom-8 right-4 z-10
+          w-12 h-12 rounded-full bg-white shadow-lg
+          flex items-center justify-center text-xl
+          disabled:opacity-50 transition-opacity
+        "
+      >
+        {locationLoading ? '⏳' : '📍'}
+      </button>
+
+      {/* Location error toast */}
+      {locationError && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 bg-zinc-800 text-white text-sm px-4 py-2 rounded-full shadow-lg whitespace-nowrap">
+          {locationError}
+        </div>
+      )}
+
+      {/* Detail panel */}
+      {panelEvent && (
+        <EventDetailPanel
+          event={panelEvent}
+          userId={userId}
+          userLat={userLat}
+          userLng={userLng}
+          onClose={handlePanelClose}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── Page root ────────────────────────────────────────────────────────────────
 
 export default function Home() {
+  const { events } = useEvents();
+  const {
+    lat: userLat,
+    lng: userLng,
+    accuracy: userAccuracy,
+    error: locationError,
+    loading: locationLoading,
+    requestLocation,
+  } = useGeolocation(USER_ID);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <MapView>
+      <InnerPage
+        events={events}
+        userId={USER_ID}
+        userLat={userLat}
+        userLng={userLng}
+        userAccuracy={userAccuracy}
+        locationError={locationError}
+        locationLoading={locationLoading}
+        onRequestLocation={requestLocation}
+      />
+    </MapView>
   );
 }
